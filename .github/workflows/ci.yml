@@ -1,0 +1,35 @@
+name: ci · проверка PR
+
+on:
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  web:
+    name: TypeScript + сборка
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # cache: npm не включаем — он падает без package-lock.json;
+      # сама установка устойчива к его отсутствию.
+      - name: Установить зависимости
+        shell: bash
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci --no-audit --no-fund
+          else
+            echo "::warning::package-lock.json отсутствует — выполняю npm install"
+            npm install --no-audit --no-fund
+          fi
+
+      - name: Проверка типов
+        run: npx tsc --noEmit --pretty false
+
+      - name: Сборка
+        run: npm run build

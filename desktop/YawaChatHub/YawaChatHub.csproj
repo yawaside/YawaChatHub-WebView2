@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>YawaChatHub</RootNamespace>
+    <AssemblyName>YawaChatHub</AssemblyName>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <Version>4.0.0</Version>
+    <ApplicationIcon>..\build\icon.ico</ApplicationIcon>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2739.15" />
+    <PackageReference Include="System.Speech" Version="8.0.0" />
+  </ItemGroup>
+
+  <!--
+    Portable-релиз публикует только YawaChatHub.exe. Поэтому HTML нельзя
+    оставлять Content-файлом рядом с exe: пользователь его не получит.
+    Vite single-file и OBS-виджет встраиваются в assembly и при запуске
+    извлекаются WebAssets в %LocalAppData%\YawaChatHub\Web.
+  -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\dist\index.html"
+                      LogicalName="YawaChatHub.Web.index.html" />
+    <EmbeddedResource Include="..\widget\index.html"
+                      LogicalName="YawaChatHub.Web.widget.html" />
+  </ItemGroup>
+
+</Project>
