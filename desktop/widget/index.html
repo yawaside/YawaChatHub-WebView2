@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>YawaChatHub — OBS widget</title>
+<style>
+  :root {
+    --w-text: #f2f4f8;
+    --w-name: #a99dff;
+    --w-bg: rgba(14,17,24,.7);
+    --w-border: rgba(255,255,255,.12);
+    --w-radius: 12px;
+    --w-font: 16px;
+    --w-shadow: 0 10px 28px rgba(2,6,18,.5);
+    --w-border-w: 1px;
+    --dur: 0.32s;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: transparent; overflow: hidden; height: 100%; }
+  body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--w-text); }
+  #feed {
+    display: flex; flex-direction: column; justify-content: flex-end;
+    gap: 8px; height: 100vh; width: 100vw; padding: 8px;
+    font-size: var(--w-font);
+  }
+  .row {
+    border-radius: var(--w-radius);
+    background: var(--w-bg);
+    border: var(--w-border-w) solid var(--w-border);
+    box-shadow: var(--w-shadow);
+    padding: 6px 10px;
+    overflow-wrap: anywhere;
+  }
+  .row .head { display: flex; align-items: baseline; gap: 6px; }
+  .row .author { font-weight: 700; color: var(--w-name); }
+  .row .pfx { font-size: .68em; font-weight: 800; opacity: .9; }
+  .row .time { margin-left: auto; font-size: .68em; opacity: .5; }
+  .emote { height: 1.55em; vertical-align: -.36em; }
+  a { color: #38e8ff; overflow-wrap: anywhere; }
+  .sys { color: var(--w-name); }
+
+  /* 8 эффектов появления (ТЗ §12.3), скорость через --dur */
+  .fx-slide-up    { animation: a-slide-up var(--dur) cubic-bezier(.22,1,.36,1) both; }
+  .fx-slide-down  { animation: a-slide-down var(--dur) cubic-bezier(.22,1,.36,1) both; }
+  .fx-slide-left  { animation: a-slide-left var(--dur) cubic-bezier(.22,1,.36,1) both; }
+  .fx-fade        { animation: a-fade var(--dur) ease both; }
+  .fx-scale       { animation: a-scale var(--dur) cubic-bezier(.22,1,.36,1) both; }
+  .fx-blur        { animation: a-blur var(--dur) ease both; }
+  .fx-bounce      { animation: a-bounce calc(var(--dur)*1.5) cubic-bezier(.22,1,.36,1) both; }
+  .fx-typewriter  { animation: a-type var(--dur) steps(24) both; }
+  @keyframes a-slide-up   { from { opacity:0; transform: translateY(16px); } }
+  @keyframes a-slide-down { from { opacity:0; transform: translateY(-16px); } }
+  @keyframes a-slide-left { from { opacity:0; transform: translateX(-18px); } }
+  @keyframes a-fade       { from { opacity:0; } }
+  @keyframes a-scale      { from { opacity:0; transform: scale(.82); } }
+  @keyframes a-blur       { from { opacity:0; filter: blur(10px); } }
+  @keyframes a-bounce { 0% { opacity:0; transform: translateY(26px) scale(.94); } 55% { opacity:1; transform: translateY(-5px) scale(1.01); } 80% { transform: translateY(2px); } 100% { transform: translateY(0); } }
+  @keyframes a-type { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+</style>
+</head>
+<body>
+<div id="feed"></div>
+<script>
+(function () {
+  var cfg = { style: "clean", showPlatform: true, showTime: true, maxMessages: 8, duration: 8, dir: "up", effect: "fx-slide-up", effectDuration: 0.32 };
+  var items = [];
+  var feed = document.getElementById("feed");
+  var colors = { twitch:"#9146FF", youtube:"#FF0033", kick:"#53FC18", tiktok:"#FE2C55", vk:"#0077FF" };
+  var short = { twitch:"TW", youtube:"YT", kick:"KK", tiktok:"TT", vk:"VK" };
+
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+
+  function renderParts(parts) {
+    var frag = document.createDocumentFragment();
+    (parts || []).forEach(function (p) {
+      if (p.t === "emote") {
+        var img = el("img", "emote"); img.src = p.url; img.alt = p.v; img.title = p.v;
+        img.onerror = function () { img.replaceWith(el("span", null, p.v)); };
+        frag.appendChild(img);
+      } else if (p.t === "link") {
+        frag.appendChild(el("a", null, p.v));
+      } else {
+        frag.appendChild(document.createTextNode(p.v));
+      }
+    });
+    return frag;
+  }
+
+  function applyConfig(ev) {
+    var c = ev.cfg || {};
+    cfg = Object.assign(cfg, c);
+    var look = ev.look || c;
+    var r = document.documentElement.style;
+    r.setProperty("--w-font", (look.fontSize || cfg.fontSize || 16) + "px");
+    r.setProperty("--w-radius", (look.radius || 12) + "px");
+    r.setProperty("--w-border-w", look.border === false ? "0px" : "1px");
+    r.setProperty("--dur", (look.effectDuration || cfg.effectDuration || 0.32) + "s");
+    if (look.textColor) r.setProperty("--w-text", look.textColor);
+    if (look.nameColor) r.setProperty("--w-name", look.nameColor);
+  }
+
+  function messageRow(msg) {
+    var row = el("div", "row " + (cfg.effect || "fx-slide-up"));
+    if (msg.sys) {
+      row.className = "row sys " + (cfg.effect || "fx-slide-up");
+      row.appendChild(el("span", null, "★ " + msg.author + " " + msg.text));
+      return row;
+    }
+    var head = el("div", "head");
+    if (cfg.showPlatform) {
+      var p = el("span", "pfx", short[msg.platform] || msg.platform);
+      p.style.color = colors[msg.platform] || "#888";
+      head.appendChild(p);
+    }
+    var a = el("span", "author", msg.author);
+    if (msg.color) a.style.color = msg.color;
+    head.appendChild(a);
+    if (cfg.showTime) {
+      var d = new Date(msg.ts);
+      head.appendChild(el("span", "time",
+        String(d.getHours()).padStart(2,"0") + ":" + String(d.getMinutes()).padStart(2,"0")));
+    }
+    row.appendChild(head);
+    var body = el("div"); body.appendChild(renderParts(msg.parts)); row.appendChild(body);
+    return row;
+  }
+
+  function tick() {
+    var now = Date.now();
+    items = items.filter(function (i) { return i.until > now; });
+    var list = items.slice(-cfg.maxMessages);
+    if (cfg.dir === "down") list = list.slice().reverse();
+    feed.innerHTML = "";
+    list.forEach(function (i) { feed.appendChild(i.node); });
+  }
+
+  function connect() {
+    var params = new URLSearchParams(location.search);
+    var proto = location.protocol === "https:" ? "wss:" : "ws:";
+    var ws = new WebSocket(proto + "//" + location.host + "/widget?token=" + encodeURIComponent(params.get("token") || ""));
+    ws.onmessage = function (e) {
+      var ev; try { ev = JSON.parse(e.data); } catch (_) { return; }
+      if (ev.type === "config") { applyConfig(ev); return; }
+      if (ev.type === "chat" && ev.msg) {
+        var node = messageRow(ev.msg);
+        items.push({ node: node, until: Date.now() + (cfg.duration || 8) * 1000 });
+        if (items.length > 40) items.shift();
+        tick();
+      }
+    };
+    ws.onclose = function () { setTimeout(connect, 2000); };
+  }
+
+  setInterval(tick, 800);
+  connect();
+})();
+</script>
+</body>
+</html>
