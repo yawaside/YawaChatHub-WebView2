@@ -1,0 +1,196 @@
+name: build · tag · release
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Принудительная версия (X.Y.Z), опционально"
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: yawachat-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Сборка
+    runs-on: windows-latest
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      tag: ${{ steps.ver.outputs.tag }}
+      has_desktop: ${{ steps.desktop.outputs.built }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Определить версию
+        id: ver
+        shell: bash
+        run: |
+          V="${{ github.event.inputs.version }}"
+          if [ -z "$V" ] && [ "${{ github.ref_type }}" = "tag" ]; then
+            V="${GITHUB_REF_NAME#v}"
+          fi
+          if [ -z "$V" ]; then
+            BASE="$(tr -d '[:space:]' < VERSION)"
+            IFS=. read -r MA MI P <<< "$BASE"
+            LATEST="$(git tag --list "v${MA}.${MI}.*" --sort=-v:refname | head -n 1)"
+            if [ -z "$LATEST" ]; then
+              V="$BASE"
+            else
+              IFS=. read -r LM LMI LP <<< "${LATEST#v}"
+              V="${MA}.${MI}.$((LP+1))"
+            fi
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "tag=v$V" >> "$GITHUB_OUTPUT"
+
+      # ── ИСПРАВЛЕНИЕ ОШИБКИ (см. scripts/sync-version.ps1) ────────────────
+      # Раньше inline-pwsh содержал "\"$v\"" — в PowerShell обратный слэш не
+      # экранирует кавычки, шаг падал с ParserError до запуска.
+      - name: Синхронизировать версию
+        shell: pwsh
+        run: |
+          scripts/sync-version.ps1 -Version "${{ steps.ver.outputs.version }}"
+
+      # Интерфейс: работает и для Vite (dist/index.html), и для Next.js (.next/).
+      # Проверка `test -f dist/index.html` УБРАНА — она ломала Next.js-сборку.
+      - name: Сборка интерфейса
+        shell: bash
+        env:
+          VITE_APP_VERSION: "${{ steps.ver.outputs.version }}"
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+          npm run build
+
+      # ── Desktop (C# + NSIS) — ТОЛЬКО если папка desktop/ существует ──────
+      # В веб-варианте (Next.js без desktop/) эти шаги пропускаются, релиз
+      # выходит без exe-артефактов. В desktop-варианте — собираются exe+NSIS.
+      - name: Установить NSIS
+        if: hashFiles('desktop/**') != ''
+        shell: pwsh
+        run: choco install nsis -y
+
+      - name: Сборка desktop (C# + NSIS)
+        id: desktop
+        if: hashFiles('desktop/**') != ''
+        shell: pwsh
+        working-directory: desktop
+        run: |
+          if (-not (Test-Path ../dist/index.html)) {
+            Write-Warning 'dist/index.html не найден — соберите фронтенд Vite перед desktop-сборкой'
+            exit 0
+          }
+          $v = "${{ steps.ver.outputs.version }}"
+          dotnet publish YawaChatHub -c Release -r win-x64 `
+            --self-contained true `
+            /p:PublishSingleFile=true `
+            /p:IncludeNativeLibrariesForSelfExtract=true `
+            -o publish/portable
+          makensis installer.nsi "/DVERSION=$v" "/DPORTABLE=publish/portable/YawaChatHub.exe"
+          echo "built=true" >> $env:GITHUB_OUTPUT
+
+      - name: Артефакты (desktop)
+        if: steps.desktop.outputs.built == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: YawaChatHub-${{ steps.ver.outputs.version }}
+          path: |
+            desktop/publish/portable/YawaChatHub.exe
+            desktop/installer/YawaChatHub-Setup.exe
+          if-no-files-found: warn
+
+  tag:
+    name: Автотег
+    needs: build
+    runs-on: ubuntu-latest
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - shell: bash
+        env:
+          TAG: ${{ needs.build.outputs.tag }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git ls-remote --exit-code --tags origin "refs/tags/$TAG" 2>/dev/null && exit 0
+          git tag -a "$TAG" -m "YawaChatHub v$VERSION — portable + installer"
+          git push origin "$TAG"
+
+  release:
+    name: Авторелиз + changelog
+    needs: [build, tag]
+    runs-on: ubuntu-latest
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+
+      # Артефакты desktop скачиваем только если они были собраны
+      - name: Скачать артефакты
+        if: needs.build.outputs.has_desktop == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: YawaChatHub-${{ needs.build.outputs.version }}
+          path: release-files
+
+      - shell: bash
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          bash scripts/changelog.sh "$VERSION" > RELEASE_NOTES.md
+          { cat RELEASE_NOTES.md; cat CHANGELOG.md; } > /tmp/cl.md && mv /tmp/cl.md CHANGELOG.md
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          git diff --cached --quiet || { git commit -m "docs: changelog v$VERSION [skip ci]"; git push; }
+
+      # Релиз с exe-артефактами (desktop-вариант)
+      - name: Публикация релиза (portable + installer)
+        if: needs.build.outputs.has_desktop == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.build.outputs.tag }}
+          name: "YawaChatHub v${{ needs.build.outputs.version }}"
+          body_path: RELEASE_NOTES.md
+          files: |
+            release-files/YawaChatHub.exe
+            release-files/YawaChatHub-Setup.exe
+        env:
+          GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+
+      # Релиз без артефактов (веб-вариант: только тег + changelog)
+      - name: Публикация релиза (веб)
+        if: needs.build.outputs.has_desktop != 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.build.outputs.tag }}
+          name: "YawaChatHub v${{ needs.build.outputs.version }}"
+          body_path: RELEASE_NOTES.md
+        env:
+          GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
