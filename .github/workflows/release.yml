@@ -1,0 +1,222 @@
+name: build · tag · release
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Принудительная версия (X.Y.Z), опционально"
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: yawachat-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Сборка
+    runs-on: windows-latest
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      tag: ${{ steps.ver.outputs.tag }}
+      has-desktop: ${{ steps.detect.outputs.has-desktop }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Определить версию
+        id: ver
+        shell: bash
+        run: |
+          V="${{ github.event.inputs.version }}"
+          if [ -z "$V" ] && [ "${{ github.ref_type }}" = "tag" ]; then
+            V="${GITHUB_REF_NAME#v}"
+          fi
+          if [ -z "$V" ]; then
+            BASE="$(tr -d '[:space:]' < VERSION)"
+            IFS=. read -r MA MI P <<< "$BASE"
+            LATEST="$(git tag --list "v${MA}.${MI}.*" --sort=-v:refname | head -n 1)"
+            if [ -z "$LATEST" ]; then
+              V="$BASE"
+            else
+              IFS=. read -r LM LMI LP <<< "${LATEST#v}"
+              V="${MA}.${MI}.$((LP+1))"
+            fi
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "tag=v$V" >> "$GITHUB_OUTPUT"
+
+      - name: Есть ли desktop-часть
+        id: detect
+        shell: bash
+        run: |
+          if [ -d "desktop" ] && ls desktop/*.sln >/dev/null 2>&1; then
+            echo "has-desktop=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-desktop=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Синхронизировать версию
+        shell: pwsh
+        run: |
+          scripts/sync-version.ps1 -Version "${{ steps.ver.outputs.version }}"
+
+      # ── Устойчивая установка зависимостей ────────────────────────────────
+      # Если package-lock.json есть в репозитории → быстрый npm ci.
+      # Если нет → npm install (создаст файл, закоммитьте его для репо).
+      - name: Установить зависимости
+        shell: bash
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci --no-audit --no-fund
+          else
+            echo "::warning::package-lock.json отсутствует — выполняю npm install"
+            npm install --no-audit --no-fund
+          fi
+
+      # ── Сборка интерфейса (Next.js) ──────────────────────────────────────
+      # Проект — Next.js, а не Vite. Выход сборки: .next/, а не dist/.
+      # Проверка test -f dist/index.html УДАЛЕНА — она не подходит для Next.js.
+      - name: Сборка интерфейса (Next.js)
+        shell: bash
+        env:
+          VITE_APP_VERSION: "${{ steps.ver.outputs.version }}"
+        run: |
+          npx tsc --noEmit --pretty false
+          npm run build
+          test -d .next && echo "✓ Next.js build готов (.next)"
+
+      - name: Веб-архив (standalone)
+        shell: bash
+        run: |
+          STANDALONE=".next/standalone"
+          if [ -d "$STANDALONE" ]; then
+            [ -d public ] && cp -r public "$STANDALONE/public"
+            if [ -d .next/static ]; then
+              mkdir -p "$STANDALONE/.next"
+              cp -r .next/static "$STANDALONE/.next/static"
+            fi
+            tar -czf "YawaChatHub-web-${{ steps.ver.outputs.version }}.tar.gz" -C "$STANDALONE" .
+            echo "✓ Web archive ready"
+          fi
+
+      # ── Desktop-сборка (C# / NSIS) — только если есть desktop/ ──────────
+      # Без desktop/ в репозитории эти шаги пропускаются (не падают).
+      # Как только desktop/ появится — exe + installer соберутся автоматически.
+      - name: Установить NSIS
+        if: steps.detect.outputs.has-desktop == 'true'
+        shell: pwsh
+        run: choco install nsis -y
+
+      - name: Сборка desktop (C#)
+        if: steps.detect.outputs.has-desktop == 'true'
+        shell: pwsh
+        working-directory: desktop
+        run: |
+          $v = "${{ steps.ver.outputs.version }}"
+          dotnet publish YawaChatHub -c Release -r win-x64 `
+            --self-contained true `
+            /p:PublishSingleFile=true `
+            /p:IncludeNativeLibrariesForSelfExtract=true `
+            -o publish/portable
+          makensis installer.nsi "/DVERSION=$v" "/DPORTABLE=publish/portable/YawaChatHub.exe"
+
+      - name: Артефакты (web)
+        uses: actions/upload-artifact@v4
+        with:
+          name: YawaChatHub-web-${{ steps.ver.outputs.version }}
+          path: YawaChatHub-web-*.tar.gz
+          if-no-files-found: ignore
+
+      - name: Артефакты (desktop)
+        if: steps.detect.outputs.has-desktop == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: YawaChatHub-${{ steps.ver.outputs.version }}
+          path: |
+            desktop/publish/portable/YawaChatHub.exe
+            desktop/installer/YawaChatHub-Setup.exe
+
+  tag:
+    name: Автотег
+    needs: build
+    runs-on: ubuntu-latest
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - shell: bash
+        env:
+          TAG: ${{ needs.build.outputs.tag }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git ls-remote --exit-code --tags origin "refs/tags/$TAG" 2>/dev/null && exit 0
+          git tag -a "$TAG" -m "YawaChatHub v$VERSION"
+          git push origin "$TAG"
+
+  release:
+    name: Авторелиз + changelog
+    needs: [build, tag]
+    runs-on: ubuntu-latest
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: YawaChatHub-web-${{ needs.build.outputs.version }}
+          path: release-files
+
+      - uses: actions/download-artifact@v4
+        if: needs.build.outputs.has-desktop == 'true'
+        with:
+          name: YawaChatHub-${{ needs.build.outputs.version }}
+          path: release-files
+
+      - shell: bash
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          bash scripts/changelog.sh "$VERSION" > RELEASE_NOTES.md
+          { cat RELEASE_NOTES.md; cat CHANGELOG.md; } > /tmp/cl.md && mv /tmp/cl.md CHANGELOG.md
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          git diff --cached --quiet || { git commit -m "docs: changelog v$VERSION [skip ci]"; git push; }
+
+      - name: Список файлов релиза
+        id: files
+        shell: bash
+        run: |
+          FILES="$(find release-files -type f 2>/dev/null | tr '\n' ' ')"
+          echo "files=${FILES}" >> "$GITHUB_OUTPUT"
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.build.outputs.tag }}
+          name: "YawaChatHub v${{ needs.build.outputs.version }}"
+          body_path: RELEASE_NOTES.md
+          files: ${{ steps.files.outputs.files }}
+        env:
+          GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
