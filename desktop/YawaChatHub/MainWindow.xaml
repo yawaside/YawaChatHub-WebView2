@@ -1,0 +1,108 @@
+<Window x:Class="YawaChatHub.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+        Title="YawaChatHub"
+        Width="1180" Height="760"
+        MinWidth="860" MinHeight="560"
+        WindowStyle="None"
+        ResizeMode="CanResize"
+        WindowStartupLocation="CenterScreen"
+        Background="#0b0e17">
+    <Window.Resources>
+        <Style x:Key="ChromeButton" TargetType="Button">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="#8b93a7" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="bg" Background="{TemplateBinding Background}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bg" Property="Background" Value="#22ffffff" />
+                                <Setter Property="Foreground" Value="#ffffff" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="ActionButton" TargetType="Button">
+            <Setter Property="Background" Value="#8b7bff" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="18,9" />
+            <Setter Property="Margin" Value="5,0" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="bg" Background="{TemplateBinding Background}" CornerRadius="10"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bg" Property="Opacity" Value="0.85" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <!-- Основной интерфейс (показывается только после успешной загрузки) -->
+        <wv2:WebView2 x:Name="WebView" Visibility="Collapsed" />
+
+        <!-- Экран запуска: виден, пока WebView2 не отрисовал интерфейс -->
+        <Grid x:Name="Splash" Background="#0b0e17">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                <Border Width="60" Height="60" CornerRadius="16" Background="#8b7bff" HorizontalAlignment="Center">
+                    <TextBlock Text="Y" Foreground="White" FontSize="30" FontWeight="Bold"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <TextBlock Text="YawaChatHub" Foreground="#eef1f8" FontSize="21" FontWeight="Bold"
+                           Margin="0,16,0,0" HorizontalAlignment="Center" />
+                <TextBlock x:Name="SplashText" Text="Запуск интерфейса…" Foreground="#8b93a7"
+                           FontSize="13" Margin="0,8,0,0" HorizontalAlignment="Center" />
+            </StackPanel>
+            <!-- Полоса для перетаскивания окна, пока нет HTML-шапки -->
+            <Border Height="36" VerticalAlignment="Top" Background="Transparent"
+                    MouseLeftButtonDown="OnChromeDrag" />
+            <!-- Нативная кнопка закрытия: окно всегда можно закрыть без Диспетчера задач -->
+            <Button Content="✕" Style="{StaticResource ChromeButton}" Click="OnCloseClick"
+                    Width="42" Height="32" HorizontalAlignment="Right" VerticalAlignment="Top"
+                    ToolTip="Закрыть (Alt+F4)" />
+        </Grid>
+
+        <!-- Панель диагностики: показывается, если интерфейс не загрузился -->
+        <Grid x:Name="ErrorPanel" Background="#0b0e17" Visibility="Collapsed">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="560" Margin="30">
+                <TextBlock Text="Интерфейс не загрузился" Foreground="#eef1f8" FontSize="20"
+                           FontWeight="Bold" HorizontalAlignment="Center" />
+                <TextBlock x:Name="ErrorText" Foreground="#8b93a7" FontSize="13" Margin="0,12,0,0"
+                           TextWrapping="Wrap" TextAlignment="Center" />
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,22,0,0">
+                    <Button x:Name="RuntimeButton" Content="Установить WebView2" Style="{StaticResource ActionButton}"
+                            Click="OnInstallRuntimeClick" Visibility="Collapsed" />
+                    <Button Content="Повторить" Style="{StaticResource ActionButton}" Click="OnRetryClick" />
+                    <Button Content="Закрыть" Style="{StaticResource ActionButton}" Background="#33ffffff"
+                            Click="OnCloseClick" />
+                </StackPanel>
+            </StackPanel>
+            <Border Height="36" VerticalAlignment="Top" Background="Transparent"
+                    MouseLeftButtonDown="OnChromeDrag" />
+            <Button Content="✕" Style="{StaticResource ChromeButton}" Click="OnCloseClick"
+                    Width="42" Height="32" HorizontalAlignment="Right" VerticalAlignment="Top" />
+        </Grid>
+    </Grid>
+</Window>
