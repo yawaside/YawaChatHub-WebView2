@@ -1,3 +1,5 @@
+## YawaChatHub v4.0.12 (2026-08-31)
+
 # Changelog
 
 ## YawaChatHub v4.0.0
