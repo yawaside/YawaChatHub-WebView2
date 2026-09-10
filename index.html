@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
+    <title>YawaChatHub — чат всех стримов в одном окне</title>
+    <style>
+      /* Фон и заставка рисуются ДО загрузки скрипта, поэтому окно
+         никогда не мигает белым при запуске. */
+      html, body { margin: 0; height: 100%; background: #0a0b13; }
+      #boot {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        background: #0a0b13;
+        font-family: "Segoe UI", system-ui, sans-serif;
+        color: #8b91a8;
+        font-size: 13px;
+        transition: opacity 0.18s ease;
+        z-index: 9999;
+      }
+      #boot .mark {
+        width: 26px;
+        height: 26px;
+        border-radius: 8px;
+        background: linear-gradient(135deg, #8b5cf6, #6366f1);
+        animation: boot-pulse 1.1s ease-in-out infinite;
+      }
+      @keyframes boot-pulse {
+        0%, 100% { transform: scale(1); opacity: 1; }
+        50% { transform: scale(0.88); opacity: 0.65; }
+      }
+      body.ready #boot { opacity: 0; pointer-events: none; }
+    </style>
+  </head>
+  <body>
+    <div id="boot"><span class="mark"></span>YawaChatHub</div>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
