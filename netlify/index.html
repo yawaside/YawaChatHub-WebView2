@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>YawaChatHub — авторизация</title>
+    <style>
+      html, body { margin: 0; height: 100%; }
+      body {
+        display: flex; align-items: center; justify-content: center;
+        background: #0a0b13; color: #eceef6;
+        font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      }
+      .card { width: min(420px, 90vw); text-align: center; }
+      .mark {
+        width: 52px; height: 52px; margin: 0 auto 18px; border-radius: 15px;
+        background: linear-gradient(135deg, #8b5cf6, #6366f1);
+        animation: pulse 1.2s ease-in-out infinite;
+      }
+      @keyframes pulse { 0%,100% { transform: scale(1) } 50% { transform: scale(.9); opacity: .7 } }
+      h1 { font-size: 17px; margin: 0 0 8px }
+      p { font-size: 13px; color: #8b91a8; margin: 0 0 14px; line-height: 1.5 }
+      .token {
+        display: none; word-break: break-all; text-align: left;
+        background: rgba(255,255,255,.06); border-radius: 10px;
+        padding: 10px 12px; font: 12px/1.5 ui-monospace, Consolas, monospace; color: #a78bfa;
+      }
+      .ok .mark { animation: none; background: linear-gradient(135deg, #34d399, #10b981) }
+      .err .mark { animation: none; background: linear-gradient(135deg, #f87171, #ef4444) }
+    </style>
+  </head>
+  <body>
+    <div class="card" id="card">
+      <div class="mark"></div>
+      <h1 id="title">Завершаем вход…</h1>
+      <p id="text">Не закрывайте вкладку, идёт передача в приложение.</p>
+      <div class="token" id="token"></div>
+    </div>
+
+    <script>
+      /**
+       * Страница-мост OAuth для YawaChatHub.
+       * Площадка возвращает токен в hash или query, а мы пересылаем его
+       * локальному слушателю приложения (127.0.0.1). Секретные ключи здесь
+       * не используются — только публичный implicit-токен пользователя.
+       */
+      (function () {
+        var card = document.getElementById("card");
+        var title = document.getElementById("title");
+        var text = document.getElementById("text");
+        var tokenBox = document.getElementById("token");
+
+        function params() {
+          var out = {};
+          [location.hash.slice(1), location.search.slice(1)].forEach(function (src) {
+            src.split("&").forEach(function (pair) {
+              if (!pair) return;
+              var i = pair.indexOf("=");
+              var k = decodeURIComponent(i < 0 ? pair : pair.slice(0, i));
+              var v = i < 0 ? "" : decodeURIComponent(pair.slice(i + 1).replace(/\+/g, " "));
+              if (v) out[k] = v;
+            });
+          });
+          return out;
+        }
+
+        function fail(msg, token) {
+          card.className = "card err";
+          title.textContent = "Не получилось";
+          text.textContent = msg;
+          if (token) {
+            tokenBox.style.display = "block";
+            tokenBox.textContent = token;
+            text.textContent = msg + " Скопируйте токен ниже и вставьте его в приложении вручную.";
+          }
+        }
+
+        function done() {
+          card.className = "card ok";
+          title.textContent = "Готово!";
+          text.textContent = "Бот подключён. Вернитесь в YawaChatHub — вкладку можно закрыть.";
+        }
+
+        var p = params();
+        var token = p.access_token || p.token;
+        var state = p.state || "";
+        var error = p.error_description || p.error;
+
+        if (error) return fail("Площадка отклонила вход: " + error);
+        if (!token) return fail("Токен не получен. Повторите вход из приложения.");
+
+        // порт локального слушателя приложения приходит в state: "<id>.<port>"
+        var port = (state.split(".")[1] || "").replace(/\D/g, "") || "8123";
+        var url =
+          "http://127.0.0.1:" + port + "/oauth?access_token=" +
+          encodeURIComponent(token) + "&state=" + encodeURIComponent(state);
+
+        var img = new Image();
+        var settled = false;
+        var finish = function (ok) {
+          if (settled) return;
+          settled = true;
+          ok ? done() : fail("Приложение не отвечает.", token);
+        };
+
+        // fetch в no-cors достаточно, чтобы запрос дошёл до слушателя
+        fetch(url, { mode: "no-cors", cache: "no-store" })
+          .then(function () { finish(true); })
+          .catch(function () {
+            img.onload = img.onerror = function () { finish(true); };
+            img.src = url + "&_=" + Date.now();
+            setTimeout(function () { finish(false); }, 2500);
+          });
+
+        setTimeout(function () { finish(true); }, 3000);
+      })();
+    </script>
+  </body>
+</html>
