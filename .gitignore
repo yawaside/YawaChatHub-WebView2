@@ -1,0 +1,18 @@
+# зависимости
+node_modules/
+
+# сборка рендерера (CI собирает сам; локально — npm run build)
+dist/
+
+# сборка .NET хоста
+publish/
+**/bin/
+**/obj/
+*.user
+
+# артефакты и служебное
+*.zip
+release-notes.md
+.vs/
+.vscode/
+*.log
