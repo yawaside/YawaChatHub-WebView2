@@ -1,0 +1,120 @@
+import { useEffect, useState } from "react";
+import { Check, Copy, ExternalLink } from "lucide-react";
+import type { WidgetConfig } from "../../lib/types";
+import { copyText, isDesktop, openExternal, widgetInfo } from "../../lib/bridge";
+import { WIDGET_STYLES, styleName } from "../../lib/presets";
+import { usePersisted } from "../../lib/persist";
+import { StyleGallery } from "./Presets";
+import { CheckRow, Collapsible, Slider } from "./ui";
+
+interface Props {
+  cfg: WidgetConfig;
+  patch: (c: WidgetConfig) => void;
+  toast: (t: string) => void;
+}
+
+export default function WidgetPanel({ cfg, patch, toast }: Props) {
+  const [copied, setCopied] = useState(false);
+  const [port, setPort] = usePersisted("widgetPort", 8085);
+  const [localOnly, setLocalOnly] = usePersisted("widgetLocalhost", true);
+  const [info, setInfo] = useState({ url: "http://127.0.0.1:8085/widget", port: 8085, running: false });
+
+  useEffect(() => {
+    void widgetInfo().then(setInfo);
+  }, []);
+
+  // Как в v1.2.4: оформление и прозрачность передаются прямо в URL.
+  // OBS получает прозрачный режим уже при первой загрузке страницы.
+  const url =
+    `${info.url}?max=${cfg.max}&fs=${cfg.fontSize}&theme=${cfg.theme}` +
+    `&font=${cfg.fontFamily ?? "inter"}&gap=${cfg.spacing ?? 4}` +
+    `${cfg.transparent ? "&transparent=1" : ""}`;
+
+  const copy = async () => {
+    if (await copyText(url)) {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+      toast("Ссылка на виджет скопирована");
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-2">
+      <Collapsible title="Стиль оформления" hint={styleName(WIDGET_STYLES, cfg.styleId)} defaultOpen>
+        <StyleGallery styles={WIDGET_STYLES} cfg={cfg} onApply={(s) => patch({ ...cfg, ...s })} />
+      </Collapsible>
+
+      {/* ссылка для OBS — главное действие раздела */}
+      <div
+        className="flex items-center gap-2 rounded-xl border px-3 py-2"
+        style={{ background: "var(--dw-panel)", borderColor: "var(--dw-line)" }}
+      >
+        <div className="min-w-0 flex-1">
+          <span className="block truncate font-mono text-[11px]" style={{ color: "var(--dw-accent-2)" }}>
+            {url}
+          </span>
+          <span className="block text-[10px]" style={{ color: "var(--dw-dim)" }}>
+            скопируйте эту ссылку в OBS Browser Source; параметры оформления уже включены
+          </span>
+        </div>
+        <button onClick={copy} className="shrink-0 cursor-pointer" title="Скопировать" style={{ color: copied ? "#4ade80" : "var(--dw-dim)" }}>
+          {copied ? <Check size={14} /> : <Copy size={14} />}
+        </button>
+        <button onClick={() => openExternal(url)} className="shrink-0 cursor-pointer" title="Открыть" style={{ color: "var(--dw-dim)" }}>
+          <ExternalLink size={14} />
+        </button>
+      </div>
+
+      <Collapsible title="Подстроить размер" hint={`${cfg.fontSize}px · ${cfg.max} строк`}>
+        <div className="flex flex-col gap-2">
+          <div>
+            <label className="mb-1 block text-[11px]" style={{ color: "var(--dw-dim)" }}>
+              Размер текста
+            </label>
+            <Slider value={cfg.fontSize} min={11} max={34} step={1} onChange={(v) => patch({ ...cfg, fontSize: v })} format={(v) => `${v}px`} />
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px]" style={{ color: "var(--dw-dim)" }}>
+              Сообщений на экране
+            </label>
+            <Slider value={cfg.max} min={2} max={20} step={1} onChange={(v) => patch({ ...cfg, max: v })} format={(v) => `${v}`} />
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px]" style={{ color: "var(--dw-dim)" }}>
+              Интервал между сообщениями
+            </label>
+            <Slider value={cfg.spacing} min={0} max={16} step={1} onChange={(v) => patch({ ...cfg, spacing: v })} format={(v) => `${v}px`} />
+          </div>
+        </div>
+      </Collapsible>
+
+      <Collapsible title="Сервер виджета" hint={`порт ${port}`}>
+        <div className="flex flex-col gap-2">
+          <div>
+            <label className="mb-1 block text-[11px]" style={{ color: "var(--dw-dim)" }}>
+              Порт для OBS Browser Source
+            </label>
+            <input
+              type="number"
+              value={port}
+              min={1024}
+              max={65535}
+              onChange={(e) => setPort(Math.max(1024, Math.min(65535, Number(e.target.value))))}
+              className="w-28 rounded-lg border border-transparent px-2.5 py-1.5 text-[12.5px] outline-none"
+              style={{ background: "var(--dw-input)", color: "var(--dw-text)" }}
+            />
+            <p className="pt-1 text-[10.5px]" style={{ color: "var(--dw-dim)" }}>
+              применится после перезапуска приложения
+            </p>
+          </div>
+          <CheckRow label="Только локальные подключения" checked={localOnly} onChange={setLocalOnly} />
+          {!isDesktop() && (
+            <p className="text-[10.5px]" style={{ color: "var(--dw-dim)" }}>
+              Сервер работает внутри приложения — в браузере это предпросмотр.
+            </p>
+          )}
+        </div>
+      </Collapsible>
+    </div>
+  );
+}
